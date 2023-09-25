@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Ui</title>
+  <base href="/">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <style>
+    .layer2 {
+      position: absolute;
+      top: 0;
+    }
+
+    .container_row {
+      height: 50px;
+      margin-top: 100px;
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+  <h1>Hello Video Conferencing</h1>
+  <form id="meeting">
+    <button type="submit" class="start-call">Start the call!</button>
+    <br/>
+
+    <label>Meeting ID:</label>
+    <input id="meetingID" type="text" value="07927fc8-af0a-11ea-b338-064f26a5f90a"/>
+    <br/>
+
+    <label>User ID:</label>
+    <input id="userID" type="text"/>
+    <br/>
+
+    <label>Peer ID:</label>
+    <input id="peerID" type="text"/>
+  </form>
+
+  <div class="container_row">
+    <video autoplay id="senderVideo" width="500" height="500" controls muted></video>
+    <div class="layer2">
+      <video autoplay id="receiverVideo" width="160" height="120" controls muted></video>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('meeting'),
+      senderVideo = document.getElementById('senderVideo'),
+      receiverVideo = document.getElementById('receiverVideo'),
+      meetingID = document.getElementById('meetingID'),
+      userID = document.getElementById('userID'),
+      peerID = document.getElementById('peerID');
+
+    function postSDP(body, isSender, cb) {
+      const url = 'http://localhost:8080/webrtc/sdp/m/'+meetingID.value+'/c/'+userID.value+'/p/'+peerID.value+'/s/'+isSender;
+      let req = new XMLHttpRequest();
+      req.open('POST', url); 
+      req.setRequestHeader('Content-Type', 'application/json');
+      req.responseType = 'json';
+      req.onload = () => {
+        cb(JSON.parse(atob(req.response.Sdp)));
+      };
+      req.send(JSON.stringify({
+        sdp: btoa(JSON.stringify(body)),
+      }));
+    }
+
+    function newPeerConn(isSender) {
+      let conn = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+        ],
+      });
+      conn.onicecandidate = event => {
+        if (event.candidate === null) {
+          postSDP(conn.localDescription,isSender,(resp) => {
+            conn.setRemoteDescription(new RTCSessionDescription(resp));
+          });
+        }
+      };
+      return conn;
+    }
+
+    form.onsubmit = () => {
+      let pcSender = newPeerConn(true);
+      let pcReceiver = newPeerConn(false);
+
+      navigator.mediaDevices.getUserMedia({video: true, audio: true}).then((stream) => {
+        senderVideo.srcObject = stream;
+        stream.getTracks().forEach(track => {
+          pcSender.addTrack(track);
+        });
+        pcSender.createOffer().then(d => pcSender.setLocalDescription(d));
+      });
+
+      // you can use event listner so that you inform he is connected!
+      pcSender.addEventListener('connectionstatechange', () => {
+        if (pcSender.connectionState === 'connected') {
+          console.log('hooray!');
+        }
+      });
+
+      // receiver part of the call
+      pcReceiver.addTransceiver('video', {direction: 'recvonly'});
+      pcReceiver.createOffer().then(d => pcReceiver.setLocalDescription(d));
+      pcReceiver.ontrack = (event) => {
+        receiverVideo.srcObject = event.streams[0];
+        receiverVideo.autoplay = true;
+        receiverVideo.controls = true;
+      };
+      return false;
+    };
+
+  </script>
+</body>
+</html>
